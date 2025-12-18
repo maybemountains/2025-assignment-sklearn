@@ -64,7 +64,6 @@ from sklearn.metrics.pairwise import pairwise_distances
 
 class KNearestNeighbors(ClassifierMixin, BaseEstimator):
     """KNearestNeighbors classifier."""
-
     def __init__(self, n_neighbors=1):  # noqa: D107
         self.n_neighbors = n_neighbors
 
@@ -107,7 +106,6 @@ class KNearestNeighbors(ClassifierMixin, BaseEstimator):
         y : ndarray, shape (n_test_samples,)
             Predicted class labels for each test data sample.
         """
-
         check_is_fitted(self)
         X = validate_data(self, X, reset=False)  # not sure if needed
 
@@ -156,7 +154,6 @@ class KNearestNeighbors(ClassifierMixin, BaseEstimator):
         score : float
             Accuracy of the model computed for the (X, y) pairs.
         """
-
         # score means accuracy -> average
         preds = self.predict(X)
 
@@ -178,7 +175,6 @@ class MonthlySplit(BaseCrossValidator):
         for which this column is not a datetime, it will raise a ValueError.
         To use the index as column just set `time_col` to `'index'`.
     """
-
     def __init__(self, time_col='index'):  # noqa: D107
         self.time_col = time_col
 
@@ -200,7 +196,6 @@ class MonthlySplit(BaseCrossValidator):
         n_splits : int
             The number of splits.
         """
-
         if self.time_col == "index":  # check if time_col is set to index
             if not hasattr(X, "index"):  # throw an error if not
                 raise ValueError("X must have a datetime index")
@@ -241,7 +236,6 @@ class MonthlySplit(BaseCrossValidator):
         idx_test : ndarray
             The testing set indices for that split.
         """
-
         if self.time_col == "index":
             if not hasattr(X, "index"):
                 raise ValueError("X must have a datetime index")
