@@ -56,6 +56,7 @@ from sklearn.base import ClassifierMixin
 
 from sklearn.model_selection import BaseCrossValidator
 
+from sklearn.utils.multiclass import check_classification_targets
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.validation import validate_data
 from sklearn.metrics.pairwise import pairwise_distances
@@ -82,6 +83,15 @@ class KNearestNeighbors(ClassifierMixin, BaseEstimator):
         self : instance of KNearestNeighbors
             The current instance of the classifier
         """
+        X, y = validate_data(self, X, y)
+        check_classification_targets(y)
+        # checks if data is continuous or not
+        # this means if classes are weird (like -1s or floats or whatever)
+
+        self.X_ = X
+        self.y_ = y
+        self.classes_ = np.unique(y)
+
         return self
 
     def predict(self, X):
@@ -97,7 +107,38 @@ class KNearestNeighbors(ClassifierMixin, BaseEstimator):
         y : ndarray, shape (n_test_samples,)
             Predicted class labels for each test data sample.
         """
-        y_pred = np.zeros(X.shape[0])
+
+        check_is_fitted(self)
+        X = validate_data(self, X, reset=False)  # not sure if needed
+
+        y_pred = np.zeros(X.shape[0], dtype=self.classes_.dtype)
+        distances = pairwise_distances(X, self.X_)  # reminder, X_ is TRAINING
+
+        if self.n_neighbors == 1:
+            # for each x test (axis=1), get the MINIMUM distance index
+            # change result from ([indexes],) to ([indexes],1) (for example),
+            # basically, it needs to match the SIZE that the
+            # rest of the code is expecting.
+            neighbors = np.argmin(distances, axis=1)[:, np.newaxis]
+        else:
+            # argpartition -> orders around the
+            # kth element (smaller first, larger after)
+            # and then continue as above.
+            neighbors = np.argpartition(
+                distances,
+                self.n_neighbors,
+                axis=1)[:, :self.n_neighbors]
+        # look at the matches. eg. look at ur
+        # closest X's classes. take majority
+
+        neighbors_classes = self.y_[neighbors]
+
+        for i in range(X.shape[0]):  # goes through all x tests
+            classes, counts = np.unique(
+                neighbors_classes[i],
+                return_counts=True)
+            y_pred[i] = classes[np.argmax(counts)]
+
         return y_pred
 
     def score(self, X, y):
@@ -115,7 +156,11 @@ class KNearestNeighbors(ClassifierMixin, BaseEstimator):
         score : float
             Accuracy of the model computed for the (X, y) pairs.
         """
-        return 0.
+
+        # score means accuracy -> average
+        preds = self.predict(X)
+
+        return np.mean(preds == y)
 
 
 class MonthlySplit(BaseCrossValidator):
@@ -155,7 +200,26 @@ class MonthlySplit(BaseCrossValidator):
         n_splits : int
             The number of splits.
         """
-        return 0
+
+        if self.time_col == "index":  # check if time_col is set to index
+            if not hasattr(X, "index"):  # throw an error if not
+                raise ValueError("X must have a datetime index")
+            dates = X.index  # set dates to the datetimes in index
+        else:
+            if not isinstance(X, pd.DataFrame):  # is it a df?
+                raise ValueError(
+                    "X must be a DataFrame with a datetime column"
+                )
+            # if a df and index wasn't our time_col,
+            # use whatever our time_col is
+            dates = X[self.time_col]
+
+        # ensure all dates are actually datetimes
+        dates = pd.to_datetime(X.index, errors="raise")
+        months = dates.to_period('M').sort_values()  # sort them !
+
+        # if only one month, then 0 splits, otherwise its total - 1 splits
+        return max(0, months.nunique() - 1)
 
     def split(self, X, y, groups=None):
         """Generate indices to split data into training and test set.
@@ -178,11 +242,37 @@ class MonthlySplit(BaseCrossValidator):
             The testing set indices for that split.
         """
 
-        n_samples = X.shape[0]
-        n_splits = self.get_n_splits(X, y, groups)
+        if self.time_col == "index":
+            if not hasattr(X, "index"):
+                raise ValueError("X must have a datetime index")
+            dates = X.index
+        else:
+            if not isinstance(X, pd.DataFrame):
+                raise ValueError(
+                    "X must be a DataFrame with a datetime column")
+            dates = X[self.time_col]
+        if not pd.api.types.is_datetime64_any_dtype(dates):
+            raise ValueError("Not a datetime")
+
+        dates = pd.to_datetime(X.index, errors="raise")
+        months = dates.to_period("M")
+
+        order = np.argsort(dates.values)  # figure out the sort order
+        months_sorted = months[order]  # sort the months
+        idx_sorted = np.asarray(order)  # get the indexes
+
+        unique_months = months_sorted.unique()  # get the unique months
+        n_splits = self.get_n_splits(X, y, groups)  # get the number of splits
+
         for i in range(n_splits):
-            idx_train = range(n_samples)
-            idx_test = range(n_samples)
-            yield (
-                idx_train, idx_test
-            )
+            # each month will be a test month
+            test_month = unique_months[i + 1]
+
+            # list of months that are less than the test month
+            train_mask = months_sorted < test_month
+            # gets u the test months we found before
+            test_mask = months_sorted == test_month
+            idx_train = idx_sorted[train_mask]
+            idx_test = idx_sorted[test_mask]
+
+            yield idx_train, idx_test
